@@ -56,6 +56,7 @@ class PPOAgent(AbstractAgent):
         vf_coef: float = 0.5,
         seed: int = 0,
         hidden_size: int = 128,
+        device: str = "cpu",
     ) -> None:
         set_seed(env, seed)
         self.seed = seed
@@ -67,10 +68,13 @@ class PPOAgent(AbstractAgent):
         self.batch_size = batch_size
         self.ent_coef = ent_coef
         self.vf_coef = vf_coef
+        self.device = device
 
         # networks
-        self.policy = Policy(env.observation_space, env.action_space, hidden_size)
-        self.value_fn = ValueNetwork(env.observation_space, hidden_size)
+        self.policy = Policy(env.observation_space, env.action_space, hidden_size).to(
+            self.device
+        )
+        self.value_fn = ValueNetwork(env.observation_space, hidden_size).to(self.device)
 
         # combined optimizer with separate lr for actor and critic
         self.optimizer = optim.Adam(
@@ -83,13 +87,13 @@ class PPOAgent(AbstractAgent):
     def predict(
         self, state: np.ndarray
     ) -> Tuple[int, torch.Tensor, torch.Tensor, torch.Tensor]:
-        t = torch.from_numpy(state).float()
+        t = torch.from_numpy(state).float().to(self.device)
         probs = self.policy(t).squeeze(0)
         dist = Categorical(probs)
         action = dist.sample().item()
         return (
             action,
-            dist.log_prob(torch.tensor(action)),
+            dist.log_prob(torch.tensor(action, device=self.device)),
             dist.entropy(),
             self.value_fn(t),
         )
@@ -102,7 +106,7 @@ class PPOAgent(AbstractAgent):
         dones: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         deltas = (
-            torch.tensor(rewards, dtype=torch.float32)
+            torch.tensor(rewards, dtype=torch.float32, device=self.device)
             + self.gamma * next_values * (1 - dones)
             - values
         )
@@ -123,18 +127,22 @@ class PPOAgent(AbstractAgent):
 
     def update(self, trajectory: List[Any]) -> None:
         # unpack trajectory
-        states = torch.stack([torch.from_numpy(t[0]).float() for t in trajectory])
-        actions = torch.tensor([t[1] for t in trajectory])
-        old_logps = torch.stack([t[2] for t in trajectory]).detach()
-        entropies = torch.stack([t[3] for t in trajectory]).detach()  # noqa: F841
+        states = torch.stack(
+            [torch.from_numpy(t[0]).float().to(self.device) for t in trajectory]
+        )
+        actions = torch.tensor([t[1] for t in trajectory]).to(self.device)
+        old_logps = torch.stack([t[2] for t in trajectory]).detach().to(self.device)
+        entropies = torch.stack([t[3] for t in trajectory]).detach().to(self.device)  # noqa: F841
         rewards = [t[4] for t in trajectory]
-        dones = torch.tensor([t[5] for t in trajectory], dtype=torch.float32)
+        dones = torch.tensor([t[5] for t in trajectory], dtype=torch.float32).to(
+            self.device
+        )
 
         # compute values and next_values
         with torch.no_grad():
             values = self.value_fn(states)
             next_states = torch.stack(
-                [torch.from_numpy(t[6]).float() for t in trajectory]
+                [torch.from_numpy(t[6]).float().to(self.device) for t in trajectory]
             )
             next_values = self.value_fn(next_states)
 
@@ -149,6 +157,11 @@ class PPOAgent(AbstractAgent):
 
         for _ in range(self.epochs):
             for b_states, b_actions, b_oldlogp, b_adv, b_ret in loader:
+                b_states = b_states.to(self.device)
+                b_actions = b_actions.to(self.device)
+                b_oldlogp = b_oldlogp.to(self.device)
+                b_adv = b_adv.to(self.device)
+                b_ret = b_ret.to(self.device)
                 probs = self.policy(b_states)
                 dist = Categorical(probs)
                 new_logp = dist.log_prob(b_actions)

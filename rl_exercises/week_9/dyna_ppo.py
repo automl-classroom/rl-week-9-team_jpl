@@ -95,10 +95,16 @@ class DynaPPOAgent(PPOAgent):
         imag_horizon: int = 5,
         imag_batches: int = 20,
         max_buffer_size: int = 100000,
+        device="cpu",
         **ppo_kwargs,
     ):
-        super().__init__(env, **ppo_kwargs)
+        super().__init__(env, device=device, **ppo_kwargs)
         self.use_model = use_model
+        self.device = device
+
+        # Move policy and value_fn to device
+        self.policy.to(self.device)
+        self.value_fn.to(self.device)
 
         # Step tracking
         self.real_steps = 0
@@ -111,7 +117,7 @@ class DynaPPOAgent(PPOAgent):
             act_dim = env.action_space.n
             self.model = DynamicsModel(
                 obs_dim, act_dim, hidden=ppo_kwargs.get("hidden_size", 128)
-            )
+            ).to(self.device)
             self.model_opt = optim.Adam(self.model.parameters(), lr=model_lr)
 
             # Hyperparameters for model learning and imagination
@@ -159,13 +165,23 @@ class DynaPPOAgent(PPOAgent):
             batch = random.sample(self.real_buffer, self.model_batch_size)
             states, actions, rewards, next_states, _ = zip(*batch)
 
-            # TODO: Predict next state delta and reward using the model
-            states_tensor = torch.tensor(states, dtype=torch.float32)
-            actions_tensor = torch.tensor(actions, dtype=torch.int64)
-            next_states_tensor = torch.tensor(next_states, dtype=torch.float32)
-            rewards_tensor = torch.tensor(rewards, dtype=torch.float32)
+            # TODO:Predict next state delta and reward using the model
+            states_tensor = torch.tensor(
+                states, dtype=torch.float32, device=self.device
+            )
+            actions_tensor = torch.tensor(
+                actions, dtype=torch.int64, device=self.device
+            )
+            next_states_tensor = torch.tensor(
+                next_states, dtype=torch.float32, device=self.device
+            )
+            rewards_tensor = torch.tensor(
+                rewards, dtype=torch.float32, device=self.device
+            )
             # One-hot encode actions
-            a_onehot = F.one_hot(actions_tensor, num_classes=self.env.action_space.n)
+            a_onehot = F.one_hot(
+                actions_tensor, num_classes=self.env.action_space.n
+            ).to(self.device)
 
             delta_s, r_pred = self.model(states_tensor, a_onehot.float())
 
@@ -211,8 +227,13 @@ class DynaPPOAgent(PPOAgent):
         # TODO: Sample a batch of transitions from the replay buffer
         val_batch = random.sample(self.real_buffer, num_samples)
         states, actions, rewards, next_states, _ = zip(*val_batch)
-
         # TODO: Compute MSE (L2) and MAE (L1) for both state and reward predictions
+        states_tensor = torch.tensor(states, dtype=torch.float32, device=self.device)
+        actions_tensor = torch.tensor(actions, dtype=torch.int64, device=self.device)
+        next_states_tensor = torch.tensor(
+            next_states, dtype=torch.float32, device=self.device
+        )
+        rewards_tensor = torch.tensor(rewards, dtype=torch.float32, device=self.device)
         with torch.no_grad():
             # Calculate metrics
             state_mse = F.mse_loss(states_tensor, next_states_tensor)
@@ -251,15 +272,20 @@ class DynaPPOAgent(PPOAgent):
             # TODO: Simulate a trajectory using the model
             for step in range(self.imag_horizon):
                 # TODO: Predict action, log-probability, entropy, and value from the PPO policy
-                action, logp, ent, val = self.predict(s)
+                action, logp, ent, val = self.predict(s).to(self.device)
 
                 # TODO: Prepare model input tensors
                 a_oh = (  # noqa: F841
-                    F.one_hot(torch.tensor(action), self.env.action_space.n)
+                    F.one_hot(
+                        torch.tensor(action, device=self.device),
+                        self.env.action_space.n,
+                    )
                     .unsqueeze(0)
                     .float()
                 )  # noqa: F841
-                s_t = torch.tensor(s, dtype=torch.float32).unsqueeze(0)  # noqa: F841
+                s_t = torch.tensor(
+                    s, dtype=torch.float32, device=self.device
+                ).unsqueeze(0)  # noqa: F841
 
                 # TODO: Predict next state delta and reward
                 with torch.no_grad():  # Don't track gradients during imagination
@@ -277,7 +303,7 @@ class DynaPPOAgent(PPOAgent):
                 if done_flag:
                     break
 
-                s = s2
+                s = s2.squeeze(0).cpu().numpy() if not done_flag else s
 
             # Only add non-empty trajectories
             if imag_traj:
@@ -533,8 +559,9 @@ class DynaPPOAgent(PPOAgent):
 @hydra.main(config_path="../configs/agent/", config_name="dyna_ppo", version_base="1.1")
 def main(cfg: DictConfig) -> None:
     if torch.cuda.is_available():
-        torch.set_default_tensor_type(torch.cuda.FloatTensor)
-        torch.set_default_device("cuda:0")
+        device = "cuda:0"
+    else:
+        device = "cpu"
 
     env = gym.make(cfg.env.name)
     set_seed(env, cfg.seed)
@@ -560,6 +587,7 @@ def main(cfg: DictConfig) -> None:
         imag_horizon=cfg.agent.imag_horizon,
         imag_batches=cfg.agent.imag_batches,
         max_buffer_size=cfg.agent.max_buffer_size,
+        device=device,
     )
 
     # Load checkpoint if specified
