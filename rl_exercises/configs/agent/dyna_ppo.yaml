@@ -17,7 +17,7 @@ agent:
   hidden_size: 128
 
   # Dyna-PPO HPs
-  use_model: False          # Enable model-based updates
+  use_model: True          # Enable model-based updates
   model_lr: 5e-4            # Learning rate for the model
   model_epochs: 3           # Number of epochs of model training
   model_batch_size: 128     # Batch size for model training

@@ -229,7 +229,6 @@ class DynaPPOAgent(PPOAgent):
         states, actions, rewards, next_states, _ = zip(*val_batch)
         # TODO: Compute MSE (L2) and MAE (L1) for both state and reward predictions
         states_tensor = torch.tensor(states, dtype=torch.float32, device=self.device)
-        actions_tensor = torch.tensor(actions, dtype=torch.int64, device=self.device)
         next_states_tensor = torch.tensor(
             next_states, dtype=torch.float32, device=self.device
         )
@@ -272,7 +271,7 @@ class DynaPPOAgent(PPOAgent):
             # TODO: Simulate a trajectory using the model
             for step in range(self.imag_horizon):
                 # TODO: Predict action, log-probability, entropy, and value from the PPO policy
-                action, logp, ent, val = self.predict(s).to(self.device)
+                action, logp, ent, val = self.predict(s)
 
                 # TODO: Prepare model input tensors
                 a_oh = (  # noqa: F841
@@ -521,8 +520,8 @@ class DynaPPOAgent(PPOAgent):
             if self.use_model:
                 self.store_real(real_traj)
                 model_state_loss, model_reward_loss = self.train_model()
-                imag_policy_loss, imag_value_loss, imag_entropy_loss = self.imagine(
-                    real_traj
+                imag_policy_loss, imag_value_loss, imag_entropy_loss = (
+                    self.imagine_and_update()
                 )
 
             # Unified logging with step tracking

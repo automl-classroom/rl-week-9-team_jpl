@@ -142,7 +142,10 @@ class PPOAgent(AbstractAgent):
         with torch.no_grad():
             values = self.value_fn(states)
             next_states = torch.stack(
-                [torch.from_numpy(t[6]).float().to(self.device) for t in trajectory]
+                [
+                    torch.tensor(t[6], dtype=torch.float32, device=self.device)
+                    for t in trajectory
+                ]
             )
             next_values = self.value_fn(next_states)
 
