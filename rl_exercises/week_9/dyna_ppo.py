@@ -144,6 +144,8 @@ class DynaPPOAgent(PPOAgent):
 
         Returns:
             Tuple of (state_loss, reward_loss) for logging
+
+        Completed with Github Copilot Completions
         """
         if not self.use_model or len(self.real_buffer) < self.model_batch_size:
             return 0.0, 0.0
@@ -158,10 +160,19 @@ class DynaPPOAgent(PPOAgent):
             states, actions, rewards, next_states, _ = zip(*batch)
 
             # TODO: Predict next state delta and reward using the model
+            states_tensor = torch.tensor(states, dtype=torch.float32)
+            actions_tensor = torch.tensor(actions, dtype=torch.int64)
+            next_states_tensor = torch.tensor(next_states, dtype=torch.float32)
+            rewards_tensor = torch.tensor(rewards, dtype=torch.float32)
+            # One-hot encode actions
+            a_onehot = F.one_hot(actions_tensor, num_classes=self.env.action_space.n)
+
+            delta_s, r_pred = self.model(states_tensor, a_onehot.float())
+
             # TODO: Compute loss for state prediction and reward prediction
-            loss_s = ...  # Placeholder for state loss
-            loss_r = ...  # Placeholder for reward loss
-            loss = ...  # Placeholder for total loss
+            loss_s = F.mse_loss(delta_s, next_states_tensor - states_tensor)
+            loss_r = F.mse_loss(r_pred, rewards_tensor)
+            loss = loss_s + loss_r
 
             self.model_opt.zero_grad()
             loss.backward()
@@ -186,6 +197,8 @@ class DynaPPOAgent(PPOAgent):
 
         Returns:
             Dict containing model evaluation metrics.
+
+        Completed with Github Copilot Completions
         """
         if not self.use_model or len(self.real_buffer) < num_samples:
             return {
@@ -196,16 +209,16 @@ class DynaPPOAgent(PPOAgent):
             }
 
         # TODO: Sample a batch of transitions from the replay buffer
-        val_batch = ...
+        val_batch = random.sample(self.real_buffer, num_samples)
         states, actions, rewards, next_states, _ = zip(*val_batch)
 
         # TODO: Compute MSE (L2) and MAE (L1) for both state and reward predictions
         with torch.no_grad():
             # Calculate metrics
-            state_mse = ...
-            reward_mse = ...
-            state_mae = ...
-            reward_mae = ...
+            state_mse = F.mse_loss(states_tensor, next_states_tensor)
+            reward_mse = F.mse_loss(rewards_tensor, rewards_tensor)
+            state_mae = F.l1_loss(states_tensor, next_states_tensor)
+            reward_mae = F.l1_loss(rewards_tensor, rewards_tensor)
 
         return {
             "state_mse": state_mse,
@@ -220,6 +233,8 @@ class DynaPPOAgent(PPOAgent):
 
         Returns:
             Tuple of (policy_loss, value_loss, entropy_loss) from imagined data
+
+        Completed with Github Copilot Completions
         """
         if not self.use_model or not self.real_buffer:
             return 0.0, 0.0, 0.0
@@ -236,21 +251,21 @@ class DynaPPOAgent(PPOAgent):
             # TODO: Simulate a trajectory using the model
             for step in range(self.imag_horizon):
                 # TODO: Predict action, log-probability, entropy, and value from the PPO policy
-                action, logp, ent, val = ...
+                action, logp, ent, val = self.predict(s)
 
                 # TODO: Prepare model input tensors
                 a_oh = (  # noqa: F841
-                    F.one_hot(torch.tensor(...), self.env.action_space.n)
+                    F.one_hot(torch.tensor(action), self.env.action_space.n)
                     .unsqueeze(0)
                     .float()
                 )  # noqa: F841
-                s_t = torch.tensor(..., dtype=torch.float32).unsqueeze(0)  # noqa: F841
+                s_t = torch.tensor(s, dtype=torch.float32).unsqueeze(0)  # noqa: F841
 
                 # TODO: Predict next state delta and reward
                 with torch.no_grad():  # Don't track gradients during imagination
-                    delta, r_pred = ...
-                    s2 = ...
-                    r_val = ...
+                    delta, r_pred = self.model(s_t, a_oh)
+                    s2 = s_t + delta
+                    r_val = r_pred.item()
 
                 # Add some termination probability to make rollouts more realistic
                 done_prob = 0.05  # 5% chance of termination per step
@@ -426,8 +441,8 @@ class DynaPPOAgent(PPOAgent):
 
             # TODO: Collect one real trajectory (episode)
             while not done and self.real_steps < total_steps:
-                action, logp, ent, val = ...
-                next_state, reward, term, trunc, _ = ...
+                action, logp, ent, val = self.predict(state)
+                next_state, reward, term, trunc, _ = self.env.step(action)
                 done = term or trunc
                 real_traj.append(
                     (state, action, logp, ent, reward, float(done), next_state)
@@ -469,7 +484,7 @@ class DynaPPOAgent(PPOAgent):
             self.total_episodes += 1
 
             # TODO: Perform PPO update on real transitions
-            policy_loss, value_loss, entropy_loss = ...
+            policy_loss, value_loss, entropy_loss = self.update(real_traj)
             last_return = sum(r for *_, r, _, _ in real_traj)
 
             # 2) Model-based steps if enabled
@@ -479,8 +494,10 @@ class DynaPPOAgent(PPOAgent):
             # TODO: If using model, train it and perform imagined updates
             if self.use_model:
                 self.store_real(real_traj)
-                model_state_loss, model_reward_loss = ...
-                imag_policy_loss, imag_value_loss, imag_entropy_loss = ...
+                model_state_loss, model_reward_loss = self.train_model()
+                imag_policy_loss, imag_value_loss, imag_entropy_loss = self.imagine(
+                    real_traj
+                )
 
             # Unified logging with step tracking
             stats = self.get_step_statistics()
@@ -515,6 +532,10 @@ class DynaPPOAgent(PPOAgent):
 
 @hydra.main(config_path="../configs/agent/", config_name="dyna_ppo", version_base="1.1")
 def main(cfg: DictConfig) -> None:
+    if torch.cuda.is_available():
+        torch.set_default_tensor_type(torch.cuda.FloatTensor)
+        torch.set_default_device("cuda:0")
+
     env = gym.make(cfg.env.name)
     set_seed(env, cfg.seed)
 
