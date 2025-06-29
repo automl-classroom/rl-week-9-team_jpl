@@ -14,19 +14,13 @@ Classes:
 
 Usage:
     python dyna_ppo.py use_model=True
-
-ToDo: (to my future self)
-- Default Way to log to CSV files
-- Use Hydra Multirun to manage the results of multiple runs
-- Use save_dir variables
-- Turn on and off the things via parameters
-- ....
 """
 
 from typing import Any, Dict, List, Tuple
 
 import os
 import random
+import warnings
 
 import gymnasium as gym
 import hydra
@@ -37,6 +31,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from omegaconf import DictConfig
 from rl_exercises.week_6.ppo import PPOAgent, set_seed
+
+warnings.filterwarnings("ignore")
 
 
 class DynamicsModel(nn.Module):
@@ -526,7 +522,7 @@ class DynaPPOAgent(PPOAgent):
                 os.path.join(os.path.dirname(__file__), "../../../")
             )
         dir_path = os.path.join(
-            workspace_root, "Log_returns_eval_HPO", str(model_name), str(seed)
+            workspace_root, "Log_returns_eval", str(model_name), str(seed)
         )
         os.makedirs(dir_path, exist_ok=True)
         csv_path = os.path.join(dir_path, "metrics.csv")
@@ -583,53 +579,6 @@ class DynaPPOAgent(PPOAgent):
                 self.real_steps += 1
                 episode_steps += 1
 
-                # Evaluation
-                if self.real_steps % eval_interval == 0:
-                    mean_r, std_r = self.evaluate(eval_env, num_episodes=eval_episodes)
-                    stats = self.get_step_statistics()
-                    # Activate to log avg returns
-                    self.log_to_csv(
-                        self.real_steps,
-                        mean_r,
-                        model_name="dyna_ppo" if self.use_model else "ppo",
-                        seed=self.seed,
-                    )
-                    if self.use_model:
-                        print(
-                            f"[Eval ] Real Steps {self.real_steps:6d} (Total: {stats['total_steps']:6d}, "
-                            f"Imag: {self.imagination_steps:6d}, Ratio: {stats['imagination_ratio']:.2f}) "
-                            f"AvgReturn {mean_r:5.1f} ± {std_r:4.1f}"
-                        )
-                        # with open("avg_returns.csv", "a") as f:
-                        #     f.write(f"{self.real_steps},{mean_r:.2f}\n")
-                    else:
-                        print(
-                            f"[Eval ] Step {self.real_steps:6d} AvgReturn {mean_r:5.1f} ± {std_r:4.1f}"
-                        )
-
-                # Model evaluation
-                if self.use_model and self.real_steps % model_eval_interval == 0:
-                    model_metrics = self.evaluate_model()
-                    print(
-                        f"[Model] Step {self.real_steps:6d} State MSE: {model_metrics['state_mse']:.4f}, "
-                        f"Reward MSE: {model_metrics['reward_mse']:.4f}"
-                    )
-                    # with open("mutli_step_errors.csv", "a") as f:
-                    #     f.write(
-                    #         f"{self.real_steps},{','.join(map(str, model_metrics['multi_step_errors']))}\n"
-                    #     )
-                    # with open("one_step_errors.csv", "a") as f:
-                    #     f.write(
-                    #         f"{self.real_steps},{model_metrics['state_mae']:.4f},{model_metrics['reward_mae']:.4f}\n"
-                    #     )
-
-                # Save checkpoint
-                if self.real_steps % save_interval == 0:
-                    save_path = os.path.join(
-                        save_dir, f"checkpoint_step_{self.real_steps}.pt"
-                    )
-                    self.save_checkpoint(save_path)
-
             self.total_episodes += 1
 
             # TODO: Perform PPO update on real transitions
@@ -648,27 +597,6 @@ class DynaPPOAgent(PPOAgent):
                     self.imagine_and_update()
                 )
 
-            # Unified logging with step tracking
-            stats = self.get_step_statistics()
-            # if self.use_model:
-            #     print(
-            #         f"[Train] Real Steps {self.real_steps:6d} (Ep: {self.total_episodes:4d}, "
-            #         f"Total: {stats['total_steps']:6d}, Imag: {self.imagination_steps:6d}) "
-            #         f"Return {last_return:5.1f} "
-            #         f"Policy Loss {policy_loss:.3f} Value Loss {value_loss:.3f} Entropy Loss {entropy_loss:.3f} "
-            #         f"Model S-Loss {model_state_loss:.3f} R-Loss {model_reward_loss:.3f} "
-            #         f"Imag P-Loss {imag_policy_loss:.3f} V-Loss {imag_value_loss:.3f} E-Loss {imag_entropy_loss:.3f}"
-            #     )
-            # else:
-            #     print(
-            #         f"[Train] Step {self.real_steps:6d} (Ep: {self.total_episodes:4d}) "
-            #         f"Return {last_return:5.1f} "
-            #         f"Policy Loss {policy_loss:.3f} Value Loss {value_loss:.3f} Entropy Loss {entropy_loss:.3f}"
-            #     )
-
-            # Log to CSV after each episode
-            # self.log_to_csv(self.real_steps, last_return, model_name="dyna_ppo" if self.use_model else "ppo", seed=self.seed)
-
         # Final checkpoint save
         final_save_path = os.path.join(save_dir, "final_checkpoint.pt")
         self.save_checkpoint(final_save_path)
@@ -681,9 +609,15 @@ class DynaPPOAgent(PPOAgent):
             f"Total episodes: {final_stats['total_episodes']}"
         )
 
+        mean_r, std_r = self.evaluate(eval_env, num_episodes=eval_episodes)
+        return mean_r
 
-@hydra.main(config_path="../configs/agent/", config_name="dyna_ppo", version_base="1.1")
-def main(cfg: DictConfig) -> None:
+
+@hydra.main(
+    config_path="../configs/agent/", config_name="dyna_ppo_HPO", version_base="1.1"
+)
+def main(cfg: DictConfig) -> float:
+    warnings.filterwarnings("ignore")
     if torch.cuda.is_available():
         device = "cpu"
     else:
@@ -720,7 +654,7 @@ def main(cfg: DictConfig) -> None:
     if hasattr(cfg, "checkpoint_path") and cfg.checkpoint_path:
         agent.load_checkpoint(cfg.checkpoint_path)
 
-    agent.train(
+    mean_r = agent.train(
         cfg.train.total_steps,
         cfg.train.eval_interval,
         cfg.train.eval_episodes,
@@ -728,6 +662,8 @@ def main(cfg: DictConfig) -> None:
         cfg.train.get("save_interval", 100000),
         cfg.train.get("save_dir", "./checkpoints"),
     )
+    env.close()
+    return -mean_r
 
 
 if __name__ == "__main__":

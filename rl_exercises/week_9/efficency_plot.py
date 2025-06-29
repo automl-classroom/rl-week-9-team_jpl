@@ -62,6 +62,23 @@ def main():
         print("No valid data found in results directory.")
         return
 
+    # Joint Plot
+    ##############
+    # Use every second evaluation for "ppo"
+    if "ppo" in baseline_data:
+        baseline_data["ppo"] = baseline_data["ppo"][:, :, ::2]
+    if "dyna_ppo" in baseline_data:
+        baseline_data["dyna_ppo"] = baseline_data["dyna_ppo"][:, :, ::2]
+    if "dyna_ppo_HPO" in baseline_data:
+        baseline_data["dyna_ppo_HPO"] = baseline_data["dyna_ppo_HPO"][
+            :, :, : baseline_data["dyna_ppo"].shape[2]
+        ]
+    if "ppo_HPO" in baseline_data:
+        baseline_data["ppo_HPO"] = baseline_data["ppo_HPO"][
+            :, :, : baseline_data["ppo"].shape[2]
+        ]
+    training_steps = training_steps[::2]
+
     ### Plot Runs over Time ###
 
     def iqm(scores):
@@ -90,14 +107,15 @@ def main():
     )
 
     # Add title and legend
-    ax.set_title("PPO and Dyna-PPO Comparison with 10 Seeds per Model")
+    ax.set_title("PPO and Dyna-PPO Comparison with 10 Seeds per Model after HPO")
     ax.legend()
     ax.grid(True)
 
     plt.tight_layout()
     save_path = Path("rliable_plots")
     plt.savefig(
-        save_path / "ppo_dyna_ppo_comparison_sample_efficiency_rliable.png", dpi=300
+        save_path / "HPO2_ppo_dyna_ppo_comparison_sample_efficiency_rliable.png",
+        dpi=300,
     )
     plt.close()
 

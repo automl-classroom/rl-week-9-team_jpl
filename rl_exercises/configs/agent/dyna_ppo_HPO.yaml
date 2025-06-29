@@ -1,0 +1,141 @@
+#Adopted from https://github.com/automl/hypersweeper/blob/main/examples/configs/mlp_smac.yaml
+# Run with python3 rl_exercises/week_9/dyna_ppo_HPO.py -m
+
+defaults:
+  - _self_
+  - override hydra/sweeper: HyperSMAC
+  - override hydra/launcher: joblib
+
+# Environment configuration
+env:
+  name: CartPole-v1
+
+
+# Search space for hyperparameter optimization
+search_space:
+  seed: 42
+  hyperparameters:
+    agent.lr_actor:
+      type: uniform_float
+      lower: 1e-6
+      upper: 1e-3
+      log: true
+    agent.lr_critic:
+      type: uniform_float
+      lower: 1e-6
+      upper: 1e-3
+      log: true
+    agent.gamma:
+      type: uniform_float
+      lower: 0.95
+      upper: 0.999
+    agent.gae_lambda:
+      type: uniform_float
+      lower: 0.9
+      upper: 0.98
+    agent.hidden_size:
+      type: uniform_int
+      lower: 64
+      upper: 256
+    agent.clip_eps:
+      type: uniform_float
+      lower: 0.1
+      upper: 0.3
+    agent.epochs:
+      type: uniform_int
+      lower: 2
+      upper: 10
+    agent.batch_size:
+      type: uniform_int
+      lower: 32
+      upper: 256
+    agent.ent_coef:
+      type: uniform_float
+      lower: 0.0
+      upper: 0.05
+    agent.vf_coef:
+      type: uniform_float
+      lower: 0.1
+      upper: 1.0
+    agent.model_lr:
+      type: uniform_float
+      lower: 1e-6
+      upper: 1e-3
+      log: true
+    agent.model_epochs:
+      type: uniform_int
+      lower: 1
+      upper: 10
+    agent.model_batch_size:
+      type: uniform_int
+      lower: 32
+      upper: 512
+    agent.imag_horizon:
+      type: uniform_int
+      lower: 2
+      upper: 10
+    agent.imag_batches:
+      type: uniform_int
+      lower: 1
+      upper: 20
+    agent.max_buffer_size:
+      type: uniform_int
+      lower: 1000
+      upper: 10000
+
+hydra:
+  sweeper:
+    n_trials: 200  
+    budget_variable: train.total_steps  
+    search_space: ${search_space}               
+    sweeper_kwargs:
+      optimizer_kwargs:
+        scenario:
+          n_trials: ${hydra.sweeper.n_trials}
+          seed: ${seed}
+          min_budget: 7500
+          max_budget: 40000
+          deterministic: true
+          n_workers: 8
+          output_directory: ./tmp/actor_critic_sweep
+        smac_facade: 
+          _target_: smac.facade.multi_fidelity_facade.MultiFidelityFacade
+          _partial_: true
+        intensifier: 
+          _target_: smac.facade.multi_fidelity_facade.MultiFidelityFacade.get_intensifier
+          _partial_: true
+          eta: 3
+  launcher:
+    _target_: hydra_plugins.hydra_joblib_launcher.joblib_launcher.JoblibLauncher
+    n_jobs: 8
+
+
+seed: 42
+agent:
+  # Base PPO hyperparameters
+  lr_actor: 5e-4
+  lr_critic: 1e-3
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  epochs: 4
+  batch_size: 64
+  ent_coef: 0.01
+  vf_coef: 0.5
+  hidden_size: 128
+
+  # Dyna-PPO HPs
+  use_model: True          # Enable model-based updates
+  model_lr: 5e-4            # Learning rate for the model
+  model_epochs: 3           # Number of epochs of model training
+  model_batch_size: 128     # Batch size for model training
+  imag_horizon: 5           # Horizon for imagined trajectories
+  imag_batches: 10          # Number of batches for imagined updates
+  max_buffer_size: 10000    # Size of the replay buffer for imagined experiences
+
+train:
+  total_steps: 50000        # Total training steps
+  eval_interval: 250       # More frequent evaluation to track progress
+  eval_episodes: 10         # More episodes for better evaluation statistics
+
+
