@@ -432,6 +432,40 @@ class DynaPPOAgent(PPOAgent):
 
         return stats
 
+    def log_to_csv(self, step: int, ret: float, model_name: str, seed: int) -> None:
+        """
+        Log step and return to a CSV file under model_name/seed/metrics.csv in the git repo root.
+        Creates directories and header if needed.
+
+        Created with Github Copilot Completions
+        """
+        import subprocess
+
+        try:
+            workspace_root = (
+                subprocess.check_output(["git", "rev-parse", "--show-toplevel"])
+                .decode()
+                .strip()
+            )
+        except Exception:
+            # Fallback: use current file's parent
+            workspace_root = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "../../../")
+            )
+        dir_path = os.path.join(
+            workspace_root, "Log_returns_eval", str(model_name), str(seed)
+        )
+        os.makedirs(dir_path, exist_ok=True)
+        csv_path = os.path.join(dir_path, "metrics.csv")
+        write_header = not os.path.exists(csv_path)
+        import csv
+
+        with open(csv_path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["step", "return"])
+            if write_header:
+                writer.writeheader()
+            writer.writerow({"step": step, "return": ret})
+
     def train(
         self,
         total_steps: int,
@@ -480,6 +514,12 @@ class DynaPPOAgent(PPOAgent):
                 if self.real_steps % eval_interval == 0:
                     mean_r, std_r = self.evaluate(eval_env, num_episodes=eval_episodes)
                     stats = self.get_step_statistics()
+                    self.log_to_csv(
+                        self.real_steps,
+                        mean_r,
+                        model_name="dyna_ppo" if self.use_model else "ppo",
+                        seed=self.seed,
+                    )
                     if self.use_model:
                         print(
                             f"[Eval ] Real Steps {self.real_steps:6d} (Total: {stats['total_steps']:6d}, "
@@ -510,7 +550,7 @@ class DynaPPOAgent(PPOAgent):
 
             # TODO: Perform PPO update on real transitions
             policy_loss, value_loss, entropy_loss = self.update(real_traj)
-            last_return = sum(r for *_, r, _, _ in real_traj)
+            # last_return = sum(r for *_, r, _, _ in real_traj)
 
             # 2) Model-based steps if enabled
             model_state_loss, model_reward_loss = 0.0, 0.0
@@ -526,21 +566,24 @@ class DynaPPOAgent(PPOAgent):
 
             # Unified logging with step tracking
             stats = self.get_step_statistics()
-            if self.use_model:
-                print(
-                    f"[Train] Real Steps {self.real_steps:6d} (Ep: {self.total_episodes:4d}, "
-                    f"Total: {stats['total_steps']:6d}, Imag: {self.imagination_steps:6d}) "
-                    f"Return {last_return:5.1f} "
-                    f"Policy Loss {policy_loss:.3f} Value Loss {value_loss:.3f} Entropy Loss {entropy_loss:.3f} "
-                    f"Model S-Loss {model_state_loss:.3f} R-Loss {model_reward_loss:.3f} "
-                    f"Imag P-Loss {imag_policy_loss:.3f} V-Loss {imag_value_loss:.3f} E-Loss {imag_entropy_loss:.3f}"
-                )
-            else:
-                print(
-                    f"[Train] Step {self.real_steps:6d} (Ep: {self.total_episodes:4d}) "
-                    f"Return {last_return:5.1f} "
-                    f"Policy Loss {policy_loss:.3f} Value Loss {value_loss:.3f} Entropy Loss {entropy_loss:.3f}"
-                )
+            # if self.use_model:
+            #     print(
+            #         f"[Train] Real Steps {self.real_steps:6d} (Ep: {self.total_episodes:4d}, "
+            #         f"Total: {stats['total_steps']:6d}, Imag: {self.imagination_steps:6d}) "
+            #         f"Return {last_return:5.1f} "
+            #         f"Policy Loss {policy_loss:.3f} Value Loss {value_loss:.3f} Entropy Loss {entropy_loss:.3f} "
+            #         f"Model S-Loss {model_state_loss:.3f} R-Loss {model_reward_loss:.3f} "
+            #         f"Imag P-Loss {imag_policy_loss:.3f} V-Loss {imag_value_loss:.3f} E-Loss {imag_entropy_loss:.3f}"
+            #     )
+            # else:
+            #     print(
+            #         f"[Train] Step {self.real_steps:6d} (Ep: {self.total_episodes:4d}) "
+            #         f"Return {last_return:5.1f} "
+            #         f"Policy Loss {policy_loss:.3f} Value Loss {value_loss:.3f} Entropy Loss {entropy_loss:.3f}"
+            #     )
+
+            # Log to CSV after each episode
+            # self.log_to_csv(self.real_steps, last_return, model_name="dyna_ppo" if self.use_model else "ppo", seed=self.seed)
 
         # Final checkpoint save
         final_save_path = os.path.join(save_dir, "final_checkpoint.pt")

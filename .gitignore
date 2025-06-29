@@ -132,6 +132,9 @@ dmypy.json
 # Logs
 logs
 outputs
+multirun
+Log_returns
+Log_returns_eval
 
 # Tmp
 tmp*
