@@ -1,31 +1,78 @@
+defaults:
+  - override hydra/launcher: joblib
+
+
 env:
   name: CartPole-v1
 
-seed: 0
-
 agent:
   # Base PPO hyperparameters
-  lr_actor: 5e-4
-  lr_critic: 1e-3
-  gamma: 0.99
-  gae_lambda: 0.95
-  clip_eps: 0.2
-  epochs: 4
-  batch_size: 64
-  ent_coef: 0.01
-  vf_coef: 0.5
-  hidden_size: 128
+  lr_actor: 0.000575
+  lr_critic: 1.8348e-06
+  gamma: 0.9824
+  gae_lambda: 0.90
+  clip_eps: 0.2421
+  epochs: 10
+  batch_size: 126
+  ent_coef: 0.0107
+  vf_coef: 0.97867
+  hidden_size: 79
 
   # Dyna-PPO HPs
-  use_model: False          # Enable model-based updates
-  model_lr: 5e-4            # Learning rate for the model
-  model_epochs: 3           # Number of epochs of model training
-  model_batch_size: 128     # Batch size for model training
-  imag_horizon: 5           # Horizon for imagined trajectories
-  imag_batches: 10          # Number of batches for imagined updates
-  max_buffer_size: 10000    # Size of the replay buffer for imagined experiences
+  use_model: ???         # Enable model-based updates
+  model_lr: 0.0007796            # Learning rate for the model
+  model_epochs: 10           # Number of epochs of model training
+  model_batch_size: 259     # Batch size for model training
+  imag_horizon: 6           # Horizon for imagined trajectories
+  imag_batches: 12          # Number of batches for imagined updates
+  max_buffer_size: 8392    # Size of the replay buffer for imagined experiences
 
 train:
-  total_steps: 15000        # Total training steps
-  eval_interval: 5000       # More frequent evaluation to track progress
+  total_steps: 40000        # Total training steps
+  eval_interval: 500       # More frequent evaluation to track progress
   eval_episodes: 10         # More episodes for better evaluation statistics
+
+
+
+
+# Default Values
+# seed: 0 
+# agent:
+#   # Base PPO hyperparameters
+#   lr_actor: 5e-4
+#   lr_critic: 1e-3
+#   gamma: 0.99
+#   gae_lambda: 0.95
+#   clip_eps: 0.2
+#   epochs: 4
+#   batch_size: 64
+#   ent_coef: 0.01
+#   vf_coef: 0.5
+#   hidden_size: 128
+
+#   # Dyna-PPO HPs
+#   use_model: True          # Enable model-based updates
+#   model_lr: 5e-4            # Learning rate for the model
+#   model_epochs: 3           # Number of epochs of model training
+#   model_batch_size: 128     # Batch size for model training
+#   imag_horizon: 5           # Horizon for imagined trajectories
+#   imag_batches: 10          # Number of batches for imagined updates
+#   max_buffer_size: 10000    # Size of the replay buffer for imagined experiences
+
+# train:
+#   total_steps: 50000        # Total training steps
+#   eval_interval: 250       # More frequent evaluation to track progress
+#   eval_episodes: 10         # More episodes for better evaluation statistics
+
+
+# Activate for concurrent sweeps
+seed: ???
+
+hydra:
+  sweeper:
+    params:
+      seed: 0,1,2,3,4,5,6,7,8,9
+      agent.use_model: True,False
+  launcher:
+    _target_: hydra_plugins.hydra_joblib_launcher.joblib_launcher.JoblibLauncher
+    n_jobs: 10

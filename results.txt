@@ -1,0 +1,28 @@
+The plots can be found under reliable_plots.
+
+1.1 Sample Efficiency:
+
+"ppo_dyna_ppo_comparison_sample_efficiency_rliable.png" shows the initial sample efficiency curve for 15k steps. At first sight, the curves of PPO and Dyna-PPO behave similarly.
+In the beginning, Dyna-PPO might suffer from a bad underlying model, but this could also be by chance.
+We thought the effect of a bad model would be much higher. On the other hand, Dyna-PPO is not able to outperform PPO significantly.
+
+So we gave HPO with BOHB (with HyperSweeper) a try. We used the steps as fidelity and an evaluation of the negative mean return over 10 trajectories as a cost function:
+"HPO2_ppo_dyna_ppo_comparison_sample_efficiency_rliable.png" and "HPO_ppo_dyna_ppo_comparison_sample_efficiency_rliable.png" show the sample efficiency.
+The incumbent configs most of the time outperform the default configs significantly.
+In the plot with 40k steps, we can see that the models do not improve after around 10k steps.
+-> Maybe the current PPO agent is not capable of solving the environment at all.
+
+PPO_HPO has a final return of 225 (80%: 180) after 15k steps.
+-> Dyna-PPO gets to 180 at around 5000 steps.
+-> PPO gets to 180 at around 8000 steps.
+=> The model might boost the sample efficiency in the early training. But this effect vanishes later on.
+
+1.2 Model Prediction Accuracy (only one seed evaluated! :() (Config before HPO was used)
+
+"multi_step_errors_plot.png" shows the multi-step error. It intuitively shows that the state-error increases when increasing the size of the rollout.
+Moreover, the model gets better overall, so the multi-step error decreases with a higher training time.
+"avg_returns_plot.png" shows the development of the one-step MSE-State-error over time. After decreasing until around 10k steps, it does not improve anymore.
+-> The model cannot learn from new experience. Since the agent might be able to balance the pole a bit, the observations are getting less diverse.
+On the other hand, the PPO agent also does not improve after this number of steps. So maybe the agent does not deliver experience such that the model can improve.
+-> This explains why Dyna-PPO's outperformance is concentrated in the early training phase, where the model is rapidly improving on diverse data.
+-> Ek seems to grow exponentially. So, we have to be careful when choosing a high imag_horizon. Moreover, a high horizon might decrease the performance in the beginning of the training, since it provides poor estimates. A long horizon could also poison the training.
