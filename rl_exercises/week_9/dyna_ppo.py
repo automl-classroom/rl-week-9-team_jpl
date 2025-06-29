@@ -204,6 +204,67 @@ class DynaPPOAgent(PPOAgent):
             total_reward_loss / self.model_epochs,
         )
 
+    def evaluate_multi_step_error(self, num_traj: int = 10, k: int = 20) -> List[float]:
+        """
+        Evaluate multi-step prediction error of the dynamics model.
+
+        Args:
+            num_traj (int): Number of trajectories to evaluate.
+            k (int): Number of steps to predict into the future.
+
+        Returns:
+            List of multi-step prediction errors for each step up to k.
+
+        Completed with Github Copilot Completions
+        """
+        if not self.use_model or len(self.real_buffer) < num_traj * k:
+            return [0.0 for _ in range(k)]
+
+        # Find valid start indices for k-step sequences without terminal states
+        valid_starts = []
+        buffer = self.real_buffer
+        N = len(buffer)
+        for i in range(N - k):
+            # Check if any transition in the k-step window is terminal
+            if not any(buffer[i + j][4] for j in range(k)):
+                valid_starts.append(i)
+        if len(valid_starts) == 0:
+            return [0.0 for _ in range(k)]
+        # Sample num_traj start indices
+        sampled_starts = random.sample(valid_starts, min(num_traj, len(valid_starts)))
+        errors = [[] for _ in range(k)]  # errors[t] = list of errors at step t+1
+        state_dim = buffer[0][0].shape[0]
+        action_dim = self.env.action_space.n
+        device = self.device
+        self.model.eval()
+        with torch.no_grad():
+            for idx in sampled_starts:
+                s = torch.tensor(
+                    buffer[idx][0], dtype=torch.float32, device=device
+                ).unsqueeze(0)
+                # Roll out k steps using model and compare to real
+                for t in range(k):
+                    a = buffer[idx + t][1]
+                    a_onehot = (
+                        F.one_hot(
+                            torch.tensor(a, device=device), num_classes=action_dim
+                        )
+                        .unsqueeze(0)
+                        .float()
+                    )
+                    # Predict delta and next state
+                    delta, _ = self.model(s, a_onehot)
+                    s_pred = s + delta
+                    s_true = torch.tensor(
+                        buffer[idx + t + 1][0], dtype=torch.float32, device=device
+                    ).unsqueeze(0)
+                    err = F.mse_loss(s_pred, s_true).item()
+                    errors[t].append(err)
+                    s = s_pred  # Use model prediction as next input
+        # Average over all sampled trajectories
+        mean_errors = [float(np.mean(e)) if e else 0.0 for e in errors]
+        return mean_errors
+
     def evaluate_model(self, num_samples: int = 1000) -> Dict[str, float]:
         """
         Evaluate the dynamics model accuracy on a validation set.
@@ -240,11 +301,15 @@ class DynaPPOAgent(PPOAgent):
             state_mae = F.l1_loss(states_tensor, next_states_tensor)
             reward_mae = F.l1_loss(rewards_tensor, rewards_tensor)
 
+        # Evaluate multi step error
+        multi_step_errors = self.evaluate_multi_step_error(num_traj=10, k=20)
+
         return {
             "state_mse": state_mse,
             "reward_mse": reward_mse,
             "state_mae": state_mae,
             "reward_mae": reward_mae,
+            "multi_step_errors": multi_step_errors,
         }
 
     def imagine_and_update(self) -> Tuple[float, float, float]:
@@ -313,6 +378,7 @@ class DynaPPOAgent(PPOAgent):
 
         # Perform PPO update on all imagined data using parent class method
         if all_imag_trajs:
+            # ??? Why not use the overridden update method???
             return super().update(all_imag_trajs)
         else:
             return 0.0, 0.0, 0.0
@@ -514,18 +580,21 @@ class DynaPPOAgent(PPOAgent):
                 if self.real_steps % eval_interval == 0:
                     mean_r, std_r = self.evaluate(eval_env, num_episodes=eval_episodes)
                     stats = self.get_step_statistics()
-                    self.log_to_csv(
-                        self.real_steps,
-                        mean_r,
-                        model_name="dyna_ppo" if self.use_model else "ppo",
-                        seed=self.seed,
-                    )
+                    # Activate to log avg returns
+                    # self.log_to_csv(
+                    #     self.real_steps,
+                    #     mean_r,
+                    #     model_name="dyna_ppo" if self.use_model else "ppo",
+                    #     seed=self.seed,
+                    # )
                     if self.use_model:
                         print(
                             f"[Eval ] Real Steps {self.real_steps:6d} (Total: {stats['total_steps']:6d}, "
                             f"Imag: {self.imagination_steps:6d}, Ratio: {stats['imagination_ratio']:.2f}) "
                             f"AvgReturn {mean_r:5.1f} ± {std_r:4.1f}"
                         )
+                        with open("avg_returns.csv", "a") as f:
+                            f.write(f"{self.real_steps},{mean_r:.2f}\n")
                     else:
                         print(
                             f"[Eval ] Step {self.real_steps:6d} AvgReturn {mean_r:5.1f} ± {std_r:4.1f}"
@@ -538,6 +607,14 @@ class DynaPPOAgent(PPOAgent):
                         f"[Model] Step {self.real_steps:6d} State MSE: {model_metrics['state_mse']:.4f}, "
                         f"Reward MSE: {model_metrics['reward_mse']:.4f}"
                     )
+                    with open("mutli_step_errors.csv", "a") as f:
+                        f.write(
+                            f"{self.real_steps},{','.join(map(str, model_metrics['multi_step_errors']))}\n"
+                        )
+                    with open("one_step_errors.csv", "a") as f:
+                        f.write(
+                            f"{self.real_steps},{model_metrics['state_mae']:.4f},{model_metrics['reward_mae']:.4f}\n"
+                        )
 
                 # Save checkpoint
                 if self.real_steps % save_interval == 0:
@@ -640,7 +717,7 @@ def main(cfg: DictConfig) -> None:
         cfg.train.total_steps,
         cfg.train.eval_interval,
         cfg.train.eval_episodes,
-        cfg.train.get("model_eval_interval", 50000),
+        cfg.train.get("model_eval_interval", 5000),
         cfg.train.get("save_interval", 100000),
         cfg.train.get("save_dir", "./checkpoints"),
     )
